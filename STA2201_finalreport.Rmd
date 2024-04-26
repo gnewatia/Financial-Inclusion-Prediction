@@ -1,0 +1,793 @@
+---
+title: A Bayesian Hierarchical Approach to Modelling Financial Inclusion in Emerging Economies
+author: "Gaurja Newatia"
+fontsize: 12pt
+abstract: Financial Inclusion has a strong positive impact on economic growth and the overall wellbeing of an individual.Using the World Bank Financial Inclusion Database as well as World Development Indicators and Financial Access Survey, we investigate individual level variables and country level variables that impact financial inclusion in Emerging Market Economies; using Bank Account Ownership as as our proxy to measure financial inclusion. Account Ownership is modelled as a binary variable using a Bayesian Hierarchichal Logistic Regression Model. The findings of the report illustrate a significant relationship between demographics and income of an individual in influencing account ownership. We model the variations in country via several macroeconomic and geographical outreach indicators and find differences among emerging markets. We also show that interaction with female and other individual level indicators is an important source to account for financial inclusion in the emerging markets. Ultimately, the model can be used to make better policies that foster financial inclusion so that emerging economies focus not only on economic prosperity but also the overall development of its' population.
+output:
+  pdf_document:
+    latex_engine: xelatex
+header-includes:
+   - \usepackage{amsmath}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+```{r libraries, message=FALSE, warning=FALSE, include=FALSE}
+library(readr)
+library(tidyverse)
+library(ggplot2)
+library(gridExtra)
+library(rstan)
+library(grid)
+library(bayesplot)
+library(loo)
+library(tidybayes)
+```
+
+```{r include=FALSE}
+source("data_cleaned.R")
+fit_1<-read_rds("fit_1.rds")
+fit_2<-read_rds("fit_2.rds")
+fit_3<-read_rds("fit_4.rds")
+```
+
+## Introduction
+
+Access to bank accounts, which is a key indicator of financial inclusion has a strong positive effect on individual's economic and social well being. A number of studies have shown that having a bank account increases savings (Aportela, 1999; Ashraf et al., 2006), consumption (Dupas and Robinson, 2013; Ashraf et al., 2010), productive investment of entrepreneurs (Dupas and Robinson, 2011, 2013), and female empowerment (Ashraf et al., 2010). The aim of this study is to therefore determine individual level factors and the country level indicators that are important to advance financial inclusion in [emerging economies](https://www.msci.com/documents/10199/c0db0a48-01f2-4ba9-ad01-226fd5678111%7D%7Bemerging%20economies).[^1]
+
+[^1]: Countries selected based on MSCI Emerging Markets Index
+
+## Data
+
+### Description of the Dataset
+
+The [Global Financial Inclusion Database 2021](https://www.worldbank.org/en/publication/globalfindex/Data) (Global Findex) is the source of individual level data used in the analysis and data for the country level indicators comes from the International Monetary Fund's Annual [Financial Access Survey (FAS)](https://data.imf.org/?sk=e5dcab7e-a5ca-4892-a6ea-598b5463a34c)and [World Development Indicators (WDI)](https://databank.worldbank.org/source/world-development-indicators) published by the World Bank. The dependent variable in our case is the variable "account", that =1 if the individual has an account at a financial institution, a mobile money account, or both , = 0 otherwise.
+
+We consider a group of independent variables that the literature identifies as important determinants of bank accounts uptake. For the purpose of our models, we divide age into categories and transform income quintiles into "High Income Group" and "Low/ Middle Income" group if a person falls in \>=4 quintile or less than quintile 4 respectively.Education measures the highest completed level of education and is grouped into three categories (1= completion of primary school or less, 2= completion of secondary education or more, 3= completed tertiary education or more). Internet access (1=respondent has access to the Internet,2=if no) is included as a proxy for infrastructure for the delivery of financial services. Female (1=Female, 2=Male) indicates whether the respondent is a woman.
+
+For the purpose of the analysis,We convert the variable age into 8 categories as follows- "Under 18", "19-30", "31-40", "41-50", "51-60", "61-70","71-80" and "Over 80". In addition to controlling for individual-level characteristics, this study also estimates the effect of theoretically relevant country-level variables on financial inclusion. GDP per capita growth(annual %) is the growth rate of gross domestic product (GDP) per capita and Unemployment, total (% of total labor force) (modeled ILO estimate) is the unemployment rate and comes from WDI. Bank branch density denotes the average number of commercial bank branches per 1,000 square kilometres and ATM density denoted average number of ATMs per 1,000 square kilometres serve as a proxy for the availability of financial services. Data for both of these indicators comes from the FAS.
+
+### Data Issues and Missing Values
+
+The Global Findex dataset included data on 21 emerging economies, contrary to the 24 in the MSCI Index. Therefore, the analysis was limited to the 21 economies covered by the Global Findex dataset. The variable "educ" contained indicators 4 and 5, and "internet access" included values 3 and 4. Unfortunately, the [codebook](https://thedocs.worldbank.org/en/doc/7f53eaea4402fbc7b985f127446c9192-0430062022/original/GlobalFindex2021-MicrodataCodebook.pdf) did not provide explanations for the "educ" values of 4 and 5. For "internet access," the values 3 and 4 were defined as "I don't know" and "refused to answer" respectively in the codebook. Given the lack of clarity regarding the "educ" variable and the ambiguous nature of the responses for "internet access," I chose to exclude rows with these specific indicators. This exercise led to the removal of Egypt from the dataset, that had only 2 rows with the previously mentioned indicators. Finally, 109 rows with missing values in the "age" variable were also removed from the analysis.
+
+## Exploratory Data Analysis
+
+### Account Ownership Across Countries
+
+In Figure 1, we can see that account ownership varies significantly by countries, with countries such as Korea, Thailand, Poland, and China that exhibit universal ownership while in countries such as Columbia, Indonesia, Mexico and India, there are a large proportion of individuals having no bank accounts.
+
+```{r echo=FALSE, fig.cap="Distribution of Account Ownerhip Across Countries"}
+p1<-df_final_eda |>
+  group_by(country)|>
+  count(account_group) |>
+  mutate(total = sum(n),       
+         prop = n / total) |>  
+  ungroup() |>              
+  ggplot(aes(x = account_group, y = prop, fill = country)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~country) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))+
+  labs(x="Does the Individual have an account?",y="Proportion", title = "Distribution of Account Ownership by Country")
+
+p1
+```
+
+\newpage
+### Age Distribution
+
+Figure 2 plots the age distribution of individuals in our dataset and as we can see, the dataset is skewed towards individuals in the 19-50 year old age groups while over 70 age group is under represented
+
+```{r echo=FALSE, fig.cap="Distribution of Age Groups observed in our dataset", fig.height=2, fig.width=4}
+df_final_eda |>
+  group_by(age) |>
+  summarise(count = n()) |>
+  mutate(prop = count / sum(count))|>
+  ggplot(aes(x = age, y = prop,fill=age)) +
+  geom_col(show.legend = F)
+```
+
+### Account Ownership based on Demographic Characteristics
+
+Figure 3 plots the distribution of account ownership our dataset based on demographics of an individual.The disparities are evident, with people having higher income have higher proportion of account holders. Account ownership also increases as the education level of an individual improves and also access to internet improves account ownership. Looking at the age groups, account ownership first increases with age but then falls as age crosses 50 years old. Finally, males show a higher proportion of account ownership compared to females, signalling gender discrimination. These findings point towards the association between demographics and account ownership, which is in line with literature
+
+```{r echo=FALSE, fig.cap="Account Ownership based on Individual Characteristics", message=FALSE}
+
+bi_1<-df_final_eda|>
+   group_by(income_quintile)|>
+  summarise(prop=mean(account))|>
+ ggplot(aes(x=income_quintile,y=prop,fill=income_quintile))+
+  geom_col(show.legend = F)+
+  coord_flip()+
+   labs(x="income_quantile",y="")
+
+ 
+ bi_2<-df_final_eda|>
+   group_by(educ)|>
+   summarise(prop=mean(account))|>
+   ggplot(aes(x=educ,y=prop,fill=educ))+
+   geom_col(show.legend = F)+
+   coord_flip()+
+  labs(x="education",y="")
+ 
+ bi_3<-df_final_eda|>
+   group_by(sex)|>
+   summarise(prop=mean(account))|>
+   ggplot(aes(x=sex,y=prop,fill=sex))+
+   geom_col(show.legend = F)+
+   coord_flip()+
+   labs(x="sex",y="")
+ 
+ 
+ bi_4<-df_final_eda|>
+   group_by(age)|>
+   summarise(prop=mean(account))|>
+   ggplot(aes(x=age,y=prop,fill=age))+
+   geom_col(show.legend = F)+
+   coord_flip()+
+   labs(x="age group",y="")+
+   coord_flip()
+
+ 
+ bi_5<-df_final_eda|>
+  group_by(internetaccess)|>
+  summarise(prop=mean(account))|>
+  ggplot(aes(x=internetaccess,y=prop,fill=internetaccess))+
+   geom_col(show.legend = F)+
+  coord_flip()+
+   labs(x="Internet Acess",y="")
+
+
+
+plots <- grid.arrange(
+  bi_1, bi_2, bi_3, bi_4, bi_5,
+  ncol = 2,
+  bottom = textGrob("Proportion", 
+                    gp = gpar(fontsize = 10), 
+                    just = "center")
+)
+
+```
+
+### Account Ownership Variation by Sex and Education across Countries
+
+Figure 4 and Figure 5 plot the distribution of account ownership by education levels and sex respectively. We find that education status while does not improve account ownership in countries such as Greece, UAE and Thailand, it matters a lot in other countries. Account ownership also varies differently by countries by sex. For example, Thailand, India and Indonesia exhibit no or little gender disparity, countries such as Mexico and Saudi Arabia exhibit significant disparities.
+
+```{r fig.cap= "Distribution of Account Ownership within Countries by Education Levels",echo=FALSE}
+
+bi_2<-df_final_eda|>
+  group_by(country,educ)|>
+  summarise(prop=mean(account))|>
+  ggplot(aes(x=educ,y=prop,fill=country))+
+  geom_col(show.legend = F)+
+  facet_wrap(~country)+
+   coord_flip()+
+  theme(axis.text.x = element_text(angle = 45,vjust = 0.5))+
+    labs(x="Proportion",y="Education")
+ bi_2 
+
+```
+
+```{r echo=FALSE, fig.cap="Distribution of Account Ownership within Countries by Sex"}
+bi_3<-df_final_eda|>
+  group_by(country,sex)|>
+  summarise(prop=mean(account))|>
+  ggplot(aes(x=sex,y=prop,fill=country))+
+  geom_col(show.legend = F)+
+  facet_wrap(~country)+
+  coord_flip()+
+  theme(axis.text.x = element_text(angle = 45,vjust = 0.5))+
+  labs(x="Proportion",y="Sex")
+
+bi_3
+```
+
+### Account Ownership and Macroeconomic Indicators
+
+Figure 6 plots the association between various country level indicators comprising of macroeconomic as well as geographical outreach variables. We observe that a positive correlation emerges between the proportion of account owners and metrics such as Bank Branch Density, ATM Density, and GDP growth rates. On the other hand, higher unemployment rates correlate negatively with account ownership.
+
+```{r echo=FALSE, fig.cap="Macroeconomic Indicators and their Association with Account Ownership. Except unemployment, all indicators show a positive relationship as also indicated by literature"}
+country_p1<-df_country_eda|>
+  ggplot(aes(x=`Number of commercial bank branches per 1,000 km2`,y=Proportion))+
+  labs(x="Bank Branch Density (log)")+
+  geom_point()
+
+country_p2<-df_country_eda|>
+  ggplot(aes(x=`Number of ATMs per 1,000 km2`,y=Proportion))+
+  labs(x="ATM density (log)")+
+  geom_point()
+
+country_p3<-df_country_eda|>
+  ggplot(aes(x=`Unemployment, total (% of total labor force) (modeled ILO estimate)`,y=Proportion))+
+  labs(x="Unemployment Rate (log)")+
+  geom_point()
+
+country_p4<-df_country_eda|>
+  ggplot(aes(x=`GDP per capita growth (annual %)`,y=Proportion))+
+  labs(x="GDP per capita growth (annual %) (log)")+
+  
+  geom_point()
+
+country_plot<-grid.arrange(country_p1,country_p2,country_p3,country_p4,ncol=2,top = textGrob( "Association between Proportion of Account Ownership and Country Level Indicators", 
+                 gp = gpar(fontsize = 12), 
+                 just = "center")
+ )
+```
+
+\newpage
+
+## Methods
+
+Since we are working with data with multiple levels, the proposed model is a Bayesian hierarchical logistic regression model. Specifically, we fit hierarchical variables for the variable country particularly because account ownership varies significantly by country. For example, in some countries we have negligible number of individuals without bank accounts. We model the hierarchical intercept for countries as a combination of country level variables. The individual level variables are fitted non-hierarchically. Weakly informative priors are set on all our regression parameters using a $𝑁(0, 1)$.This was done to incorporate prior knowledge from the literature i.e. the former has a positive impact on account ownership while the latter has a negative impact. This was also done to speed up the convergence process of MCMC. any undue influence or information about the parameters to the prior The following notation will be used to describe the models: let $y_i$ represent the account ownership variable (1=has an account, 0 otherwise), $X$ is a matrix of individual level variables.In Model 2, the matrix $X$ includes interaction terms. The model will be fit using an R package, RStan which allows us the capability to fit a Bayesian model. Three variations of the model were considered which is discussed below. For each model, we validate the results using posterior predictive checks (PPC) to see if our model is able to capture specific test statistics. In particular, we are interested in the Proportion of Account Ownership captured by our Models which will then allow us to compare our observed data to the replicated data from our model to determine which model is the ideal fit. Furthermore, for each model, we will calculate the expected log point-wise predictive density (ELPD) and determine if it is an appropriate criterion for our setting.
+
+### Model-1
+
+Bayesian Hierarchical Model with a random intercept by country
+
+$$
+\begin{aligned}
+y_{i}|\alpha_{j[i]}, \beta &\sim \text{Bernoulli}\left(\text{logit}^{-1}\left(\alpha_{j[i]} + X_i \cdot \beta\right)\right), & \text{for } i = 1,2,\ldots,N \\
+\alpha_{j[i]} &\sim \text{N}\left(\gamma_{0} + \gamma_{1} \cdot \text{gdppercapita}_j + \gamma_{2} \cdot \text{atmdensity}_j + \gamma_{3} \cdot \text{bankbranchdensity}_j \right.\\
+&\quad \left.+\gamma_{4} \cdot\ \text{UnemploymentRate}_j, \sigma_{\alpha}^2\right), & \text{for } j = 1,2,\ldots,19 \\
+\end{aligned}
+$$
+
+### Model-2
+
+Bayesian Hierarchical Model with a random intercept and interaction effect(Matrix X) of female with individual level variables
+
+$$
+\begin{aligned}
+y_{i}|\alpha_{j[i]}, \beta &\sim \text{Bernoulli}\left(\text{logit}^{-1}\left(\alpha_{j[i]} + X_i \cdot \beta\right)\right), & \text{for } i = 1,2,\ldots,N \\
+\alpha_{j[i]} &\sim \text{N}\left(\gamma_{0} + \gamma_{1} \cdot \text{gdppercapita}_j + \gamma_{2} \cdot \text{atmdensity}_j + \gamma_{3} \cdot \text{bankbranchdensity}_j \right.\\
+&\quad \left.+\gamma_{4} \cdot\ \text{UnemploymentRate}_j, \sigma_{\alpha}^2\right), & \text{for } j = 1,2,\ldots,19 \\
+\end{aligned}
+$$
+
+### Model-3
+
+Bayesian Hierarchical Model with a random intercept and slope by country
+
+$$
+\begin{aligned}
+y_i \, | \, \alpha_{j[i]}, \beta_{j[i]} &\sim \text{Bernoulli}\left(\text{logit}^{-1}\left(\alpha_{j[i]} + X_i \cdot \beta_{j[i]}\right)\right), & \text{ for } i = 1,2,\ldots,N \\
+\alpha_{j[i]} &\sim \text{Normal}\left(\gamma_0 + \gamma_{1j} \cdot \text{gdppercapita}_j + \gamma_{2j} \cdot \text{atmdensity}_j + \gamma_{3j} \cdot \text{bankbranchdensity}_j \right.\\
+&\left.\quad + \gamma_{4j} \cdot \text{Unemployment Rate}_j, \sigma_{\alpha}^2\right), & \text{ for } j = 1,2,\ldots,19 \\
+\end{aligned}
+$$
+
+## Results
+
+To ensure our models have converged we look at the $\hat{R}$ and $n_{eff}$ for each parameter. $\hat{R}$ compares the between-and within-chain estimates for each parameter; thus, since it is close to 1 for all parameters in each model, this ensures that the chains have mixed well. Furthermore, our measure of effective sample size, $n_{eff}$ , is also quite large for each parameter. Lastly, the trace plots for the first 10 parameters in each model appeared to have mixed well.
+
+### Posterior Predictive Checks
+
+We use 100 samples from our posterior predictive distribution from each model to assess how it fits the distribution of our observed data
+
+```{r include=FALSE}
+yrep1 <- extract(fit_1)[["y_rep"]]
+yrep2 <- extract(fit_2)[["y_rep"]]
+yrep3<-extract(fit_3)[["y_rep"]]
+```
+
+### Proportion of Account Holders
+
+Figure 7 plots the proportion of account holders in our posterior samples across the three models. In Model 1,most posterior datasets exhibit proportions slightly lower than the actual proportion of account holders while Model 2's posterior datasets most frequently match the true proportion. In contrast, Model 3's posterior datasets exhibit a mix, with some proportions slightly lower and others slightly higher than the actual proportion of account holders.
+
+```{r include=FALSE}
+g1<-ppc_stat(y=df_final_eda$account,yrep1)+labs(subtitle = "Model-1")
+g2<-ppc_stat(y=df_final_eda$account,yrep2,freq = F)+labs(subtitle = "Model-2")
+g3<-ppc_stat(y=df_final_eda$account,yrep3,freq = F)+labs(subtitle = "Model-3")
+```
+
+```{r echo=FALSE, fig.cap="Proportion of Account Ownership in Posterior Samples", fig.width=6, message=FALSE, warning=FALSE}
+grid.arrange(g1, g2, g3, ncol=2, top=textGrob("Distribution of Observed Account Holders and Predicted Account Holders"))
+```
+
+```{r include=FALSE}
+male_ind<-df_final_eda$sex=="Male"
+highincome_ind<-df_final_eda$income_quintile=="High Income"
+primary<-df_final_eda$educ=="Primary School or Less"
+secondary<-df_final_eda$educ== "Secondary School"
+tertiary<-df_final_eda$educ== "Tertiary Education or More"
+int<-df_final_eda$internetaccess=="Internet"
+age1<-df_final_eda$age=="Under 18" 
+age2<-df_final_eda$age=="19-30" 
+age3<-df_final_eda$age=="31-40" 
+age4<-df_final_eda$age=="41-50"
+age5<-df_final_eda$age== "51-60"  
+age6<-df_final_eda$age=="61-70" 
+age7<-df_final_eda$age=="71-80"
+age8<-df_final_eda$age=="Over 80" 
+y<-df_final_eda$account
+```
+
+```{r include=FALSE}
+set.seed(1856)
+samp100_1 <- sample(nrow(yrep1), 100)
+samp100_2 <- sample(nrow(yrep2), 100)
+samp100_3<-sample(nrow(yrep3), 100)
+```
+
+### Distribution of Account Holders by Demographics and Income
+
+#### [Distribution of Account Holders by Sex]{.underline}
+
+In Figure 8, we plot the Proportion of Account Holders by Sex across the three models and find that majority of the posterior simulated datasets in Model 1 and Model 3 have higher proportion of male account holders and slightly lower proportion of female account holders than the actual proportion. In contrast, Model 2 has the same proportion as actual for Male account holders while slightly higher proportion for females.
+
+```{r include=FALSE}
+mod1_male <- ppc_stat(y[male_ind], yrep1[samp100_1, male_ind])  + 
+  labs(subtitle="Model 1, Male Account Holders") +
+  theme(text = element_text(size = 12), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+mod2_male <- ppc_stat(y[male_ind], yrep2[samp100_2, male_ind])  + 
+  labs(subtitle="Model 2, Male Account Holders") +
+  theme(text = element_text(size = 12), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+mod3_male <- ppc_stat(y[male_ind], yrep3[samp100_3, male_ind])  + 
+  labs(subtitle="Model 3, Male Account Holders") +
+  theme(text = element_text(size = 12), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+mod1_female <- ppc_stat(y[!male_ind], yrep1[samp100_1, !male_ind])  + 
+  labs(subtitle="Model 1, Female Account Holders") +
+  theme(text = element_text(size = 12), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+mod2_female <- ppc_stat(y[!male_ind], yrep2[samp100_2, !male_ind])  + 
+  labs(subtitle="Model 2, Female Account Holders") +
+  theme(text = element_text(size = 12), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+mod3_female <- ppc_stat(y[!male_ind], yrep3[samp100_3, !male_ind])  + 
+  labs(subtitle="Model 3, Female Account Holders") +
+  theme(text = element_text(size = 12), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+```
+
+```{r echo=FALSE, fig.cap="Distribution of Account Ownership by Sex in 100 Samples of Posterior Datasets", fig.width=10, message=FALSE, warning=FALSE}
+grid.arrange(mod1_male, mod2_male,mod3_male, mod1_female, mod2_female,mod3_female, ncol=3, top=textGrob("Distribution of Observed Account Holders and Predicted Account Holders by Sex"))
+```
+
+#### [Distribution of Account Holders by Internet Access]{.underline}
+
+From Figure 9, we observe that Model-1 closely captures the proportion of account holders among those who have internet access but predicts significantly higher proportion of account holders among non internet users.All the three models fail to capture the actual proportion of account holders among the non internet users, this could be due to the less proportion of non internet users in our total dataset.
+
+```{r include=FALSE}
+mod1_int <- ppc_stat(y[int], yrep1[samp100_1,int])  + 
+  labs(subtitle="Model 1,  Account Holders-Internet")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+mod2_int <- ppc_stat(y[int], yrep2[samp100_2, int])  + 
+  labs(subtitle="Model 2, Account Holders-Internet")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+mod3_int <- ppc_stat(y[int], yrep3[samp100_3, int])  + 
+  labs(subtitle="Model 3, Account Holders-Internet")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+mod1_nint<-ppc_stat(y[!int], yrep1[samp100_1, !int])  + 
+  labs(subtitle="Model 1,Account Holders No Int")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+  mod2_nint<-ppc_stat(y[!int], yrep2[samp100_2,! int])  + 
+  labs(subtitle="Model 2, Account Holders No Int")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+  
+mod3_nint<-ppc_stat(y[!int], yrep3[samp100_3,! int])  + 
+  labs(subtitle="Model 3, Account Holders No Int")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+```
+
+```{r echo=FALSE, fig.cap="Distribution of Account Ownership by Access to the Internet in 100 Samples of Posterior Datasets", fig.width=10}
+grid.arrange(mod1_int, mod2_int, mod3_int,mod1_nint, mod2_nint,mod3_nint, ncol=3, top=textGrob("Distribution of Observed Account Holders and Predicted Account Holders by Internet Access"))
+```
+
+#### [Distribution of Account Holders by Education Levels]{.underline}
+
+From Figure 10, it is evident that Model 2 closely matches the proportion of actual account holders observed across the three education levels while Model 3 gives bad results, with higher proportion in primary and secondary education holders but lower proportion for tertiary education holders.
+
+```{r include=FALSE}
+mod1_p <- ppc_stat(y[primary], yrep1[samp100_1,primary])  + 
+  labs(subtitle="Model 1, Primary Education or Less")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+mod2_p <- ppc_stat(y[primary], yrep2[samp100_2, primary])  + 
+  labs(subtitle="Model 2, Primary Education or Less")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+mod3_p <- ppc_stat(y[primary], yrep3[samp100_3, primary])  + 
+  labs(subtitle="Model 3,Primary Education or Less")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+  
+mod1_s<-ppc_stat(y[secondary], yrep1[samp100_1, secondary])  + 
+  labs(subtitle="Model 1,Secondary Education or More")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+  mod2_s<-ppc_stat(y[secondary], yrep2[samp100_2,secondary])  + 
+  labs(subtitle="Model 2, Secondary Education or More")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+mod3_s<-ppc_stat(y[secondary], yrep2[samp100_3,secondary])  + 
+  labs(subtitle="Model 3, Secondary Education or More")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  mod1_t<-ppc_stat(y[tertiary], yrep1[samp100_1, tertiary])  + 
+  labs(subtitle="Model 1,Tertiary Education or More")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+  mod2_t<-ppc_stat(y[tertiary], yrep2[samp100_2, tertiary])  + 
+  labs(subtitle="Model 2,Tertiary Education or More")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+mod3_t<-ppc_stat(y[tertiary], yrep2[samp100_3, tertiary])  + 
+  labs(subtitle="Model 3,Tertiary Education or More")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+  
+```
+
+```{r echo=FALSE, fig.cap="Distribution of Account Ownership by Education Levels in 100 Samples of Posterior Datasets", fig.width=10, message=FALSE, warning=FALSE}
+grid.arrange(mod1_p, mod2_p,mod3_p ,mod1_s, mod2_s,mod3_s, mod1_t, mod2_t,mod3_t,ncol=3, top=textGrob("Distribution of Observed and Predicted Account Holders based on Education"))
+```
+
+#### [Distribution of Account Holders by Income]{.underline}
+
+From Figure 11, we observe that Model 2 closely captures the actual proportion of account holders among both high and low income individuals while Model 3 underestimates the proportion across both the groups.
+
+```{r include=FALSE}
+mod1_hc <- ppc_stat(y[highincome_ind], yrep1[samp100_1, highincome_ind])  + 
+  labs(subtitle="Model 1, High Income Account Holders")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+mod2_hc <- ppc_stat(y[highincome_ind], yrep2[samp100_2, highincome_ind])  + 
+  labs(subtitle="Model 2, High Income Account Holders")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+mod3_hc <- ppc_stat(y[highincome_ind], yrep3[samp100_3, highincome_ind])  + 
+  labs(subtitle="Model 3, High Income Account Holders")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+  
+mod1_lc<-ppc_stat(y[!highincome_ind], yrep1[samp100_1, !highincome_ind])  + 
+  labs(subtitle="Model 1, Low Income Account Holders")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+  mod2_lc<-ppc_stat(y[!highincome_ind], yrep2[samp100_2,! highincome_ind])  + 
+  labs(subtitle="Model 2, Low Income Account Holders")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+mod3_lc<-ppc_stat(y[!highincome_ind], yrep3[samp100_3,! highincome_ind])  + 
+  labs(subtitle="Model 3, Low Income Account Holders")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+```
+
+```{r echo=FALSE, fig.cap="Distribution of Account Ownership by Income Levels in 100 Samples of Posterior Datasets", fig.width=10}
+grid.arrange(mod1_hc, mod2_hc,mod3_hc, mod1_lc, mod2_lc,mod3_lc, ncol=3, top=textGrob(" Distribution of Observed and Predicted Account Holders based on Income"))
+```
+
+#### [Distribution of Account Holders for Certain Age Groups]{.underline}
+
+In Figure 12, we try to visualize the performance of the three models across the underrepresented age groups in our dataset as indicated in our exploratory data analysis i.e. individuals less than 18 years and above 70 years in age. We find that Model 3 fails to capture the proportion of account holders among less than 18 year olds i.e. it significantly overestimates the proportion when compared to Model-1 and Model-2. When it comes to older age groups, all models fail to capture the true proportion except Model-2 that gives closer to the actual proportion of account holders among people aged 80 or more.
+
+```{r include=FALSE}
+mod1_age1 <- ppc_stat(y[age1], yrep1[samp100_1, age1])  + 
+  labs(subtitle="Model 1,Under 18"  )+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+mod1_age2 <- ppc_stat(y[age2], yrep1[samp100_1, age2])  + 
+  labs(subtitle="Model 1, 19-30" )+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+mod1_age3 <- ppc_stat(y[age3], yrep1[samp100_1, age3])  + 
+  labs(subtitle="Model 1, 31-40" )+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+mod1_age4 <- ppc_stat(y[age4], yrep1[samp100_1, age4])  + 
+  labs(subtitle="Model 1, 41-50")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+mod1_age5 <- ppc_stat(y[age5], yrep1[samp100_1, age5])  + 
+  labs(subtitle="Model 1, 51-60" )+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+mod1_age6 <- ppc_stat(y[age6], yrep1[samp100_1, age6])  + 
+  labs(subtitle="Model 1, 61-70" )+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+  mod1_age7 <- ppc_stat(y[age7], yrep1[samp100_1, age7])  + 
+  labs(subtitle="Model 1,71-80")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+ 
+
+  mod1_age8 <- ppc_stat(y[age8], yrep1[samp100_1, age8])  + 
+  labs(subtitle="Model 1, Over 80" )+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+   
+  
+  
+mod2_age1 <- ppc_stat(y[age1], yrep2[samp100_2, age1])  + 
+  labs(subtitle="Model 2, Under 18" )+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  mod2_age2 <- ppc_stat(y[age2], yrep2[samp100_2, age2])  + 
+  labs(subtitle="Model 2, 19-30" )+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+  mod2_age3 <- ppc_stat(y[age3], yrep2[samp100_2, age3])  + 
+  labs(subtitle="Model 2, 31-40" )+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+  mod2_age4 <- ppc_stat(y[age4], yrep2[samp100_2, age4])  + 
+  labs(subtitle="Model 2, 41-50")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+  mod2_age5 <- ppc_stat(y[age5], yrep2[samp100_2, age5])  + 
+  labs(subtitle="Model 2, 51-60" )+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+  mod2_age6 <- ppc_stat(y[age6], yrep2[samp100_2, age6])  + 
+  labs(subtitle="Model 2, 61-70" )+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+  mod2_age7 <- ppc_stat(y[age7], yrep2[samp100_2, age7])  + 
+  labs(subtitle="Model 2, 71-80")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+ mod2_age8 <- ppc_stat(y[age8], yrep2[samp100_2, age8])  + 
+  labs(subtitle="Model 2, Over 80")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+mod3_age1 <- ppc_stat(y[age1], yrep3[samp100_3, age1])  + 
+  labs(subtitle="Model 3, Under 18" )+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+
+  mod3_age2 <- ppc_stat(y[age2], yrep3[samp100_3, age2])  + 
+  labs(subtitle="Model 3, 19-30" )+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+  mod3_age3 <- ppc_stat(y[age3], yrep3[samp100_3, age3])  + 
+  labs(subtitle="Model 3, 31-40" )+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+  mod3_age4 <- ppc_stat(y[age4], yrep3[samp100_3, age4])  + 
+  labs(subtitle="Model 3, 41-50")
+  theme(text = element_text(size = 12))
+  
+  mod3_age3 <- ppc_stat(y[age5], yrep3[samp100_3, age5])  + 
+  labs(subtitle="Model 3, 51-60" )+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+  mod3_age3 <- ppc_stat(y[age6], yrep3[samp100_3, age6])  + 
+  labs(subtitle="Model 3, 61-70" )+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+  mod3_age7 <- ppc_stat(y[age7], yrep3[samp100_3, age7])  + 
+  labs(subtitle="Model 3, 71-80")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+ mod3_age8 <- ppc_stat(y[age8], yrep3[samp100_3, age8])  + 
+  labs(subtitle="Model 3, Over 80")+
+  theme(text = element_text(size = 10), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5))
+  
+```
+
+```{r echo=FALSE, fig.cap="Distribution of Account Ownership by Age in 100 Samples of Posterior Datasets", fig.width=10}
+grid.arrange(mod1_age1, mod2_age1, mod3_age1,mod1_age7, mod2_age7, mod3_age7, mod1_age8,mod2_age8, mod3_age8, ncol=3, top=textGrob("Distribution of Observed  and Predicted Account Holders"))
+```
+
+We also evaluate the Expected Log Predictive Density (ELPD) for the three models to choose an optimal model, While Model 3 has the largest ELPD value among the three models; it clearly performs worse in capturing the test statistic for a lot of variables such as age, sex and education levels. Hence, instead of choosing Model-3, we choose Model-2 which has a second highest ELPD and also performs significantly better in our PPC. The remaining interpretations on the estimated effects will be done solely for this model.
+
+```{r include=FALSE}
+log_lik1<-extract(fit_1)[["log_lik"]]
+log_lik2<-extract(fit_2)[["log_lik"]]
+log_lik_3<-extract(fit_3)[["log_lik"]]
+```
+
+```{r include=FALSE}
+loo1 <- loo(log_lik1, save_psis = TRUE)
+loo2 <- loo(log_lik2, save_psis = TRUE)
+loo3<-loo(log_lik_3,save_psis = T)
+
+```
+
+## Coefficient Effects
+
+Using the preferred model, we investigate the coefficient estimates for each of our factors.We will exponentiate our effects so it can be interpreted in terms of the odd ratio.
+
+### Effects of Demograhics and Income
+
+In Figure 13, we plot the estimated effect of an Individual's Demographics and Income on Account Ownership. The influence of an individual's sex is lower than 1, with males being 0.77 times more likely to possess account ownership compared to females. However, education has a substantial impact, as individuals with secondary school education are 1.45 times more likely to have account ownership than those with primary education, while tertiary educated individuals are 3.41 times more likely. In contrast, access to the internet and income levels show relatively smaller but still positive effects. This could be attributed to the widespread availability of affordable internet options in many countries, along with targeted government policies aimed at encouraging low-income individuals to open bank accounts.
+
+```{r include=FALSE}
+post_sex <- summary(fit_2)$summary[c(paste0("beta[2]")),]
+post_internet <- summary(fit_2)$summary[c(paste0("beta[5]")),]
+post_educsec<-summary(fit_2)$summary[c(paste0("beta[3]")),]
+post_eductertiary<-summary(fit_2)$summary[c(paste0("beta[4]")),]
+post_li<-summary(fit_2)$summary[c(paste0("beta[13]")),]
+```
+
+```{r echo=FALSE, fig.cap="Estimated effect of an Individual's Demographics and Income on Account Ownership.Error Bars Represent 95% Credible Intervals for the Mean Posterior Odds Ratio", message=FALSE, warning=FALSE}
+
+df <- data.frame(
+  Factor = c("Sex", "Internet Access", "Secondary Education", "Tertiary Education", "Low Income"),
+  Average = exp(c(post_sex["mean"], post_internet["mean"], post_educsec["mean"], post_eductertiary["mean"], post_li["mean"])),
+  Lower = exp(c(post_sex["2.5%"], post_internet["2.5%"], post_educsec["2.5%"], post_eductertiary["2.5%"], post_li["2.5%"])),
+  Upper = exp(c(post_sex["97.5%"], post_internet["97.5%"], post_educsec["97.5%"], post_eductertiary["97.5%"], post_li["97.5%"]))
+) %>% 
+  mutate(across(.cols = starts_with("Average") | starts_with("Lower") | starts_with("Upper"), 
+                .fns = round, digits = 3))
+
+
+
+plot <- df %>% 
+  ggplot(aes(x = Factor, y = Average)) + 
+  geom_point() +
+  geom_errorbar(aes(ymin = Lower, ymax = Upper), width = 0.2) +
+  coord_flip() +
+  labs(x = "Demographic Factors", y = "Average Estimated Effect", title = "Estimated Effect on Account Ownership", subtitle = "Demographic Factors and Income")
+
+print(plot)
+
+```
+
+```{r include=FALSE}
+post_1 <- summary(fit_2)$summary[c(paste0("beta[6]")),]
+post_2 <- summary(fit_2)$summary[c(paste0("beta[7]")),]
+post_3<-summary(fit_2)$summary[c(paste0("beta[8]")),]
+post_4<-summary(fit_2)$summary[c(paste0("beta[9]")),]
+post_5<-summary(fit_2)$summary[c(paste0("beta[10]")),]
+post_6<-summary(fit_2)$summary[c(paste0("beta[11]")),]
+post_7<-summary(fit_2)$summary[c(paste0("beta[12]")),]
+```
+
+```{r echo=FALSE, fig.height=3, fig.width=4, message=FALSE, warning=FALSE,fig.cap="Estimated Effect on Account Ownership Based on Age. Error Bars Represent 95% Credible Intervals for the Mean Posterior Odds Ratio"}
+
+df <- data.frame(
+  Factor = c("19-30", "31-40", "41-50", "51-60", "61-70", "71-80", "Over 80"),
+  Average = exp(c(post_1["mean"], post_2["mean"], post_3["mean"], post_4["mean"], post_5["mean"], post_6["mean"], post_7["mean"])),
+  Lower = exp(c(post_1["2.5%"], post_2["2.5%"], post_3["2.5%"], post_4["2.5%"], post_5["2.5%"], post_6["2.5%"], post_7["2.5%"])),
+  Upper = exp(c(post_1["97.5%"], post_2["97.5%"], post_3["97.5%"], post_4["97.5%"], post_5["97.5%"], post_6["97.5%"], post_7["97.5%"]))
+) %>%
+  mutate(across(c(Average, Lower, Upper), round, digits = 3))
+
+
+
+plot <- df |>
+  ggplot(aes(x = Factor, y = Average)) + 
+  geom_point() +
+  geom_errorbar(aes(ymin = Lower, ymax = Upper), width = 0.2) +
+  coord_flip() +
+  labs(x = "Age Group", y = "Average Estimated Effect", 
+       title = "Estimated Effect on Account Ownership", 
+       subtitle = "Age Groups Impact Analysis")
+
+print(plot)
+
+```
+
+For Age Effects, as shown in Figure 14, the impact of an individual's age on account ownership first increases then eventually falls. Individuals aged 31-60 are notably more than twice as likely to have account ownership compared to those under 18 years old. However, this propensity appears to level off among senior citizens, who are only approximately 1 times more likely to possess account ownership.
+
+### Interaction Effects
+
+In Figure 15, we present the interaction effects of Sex with certain key attributes like Income and Education Levels. It's evident that among individuals with low income, males are approximately 1.2 times more likely to possess a bank account compared to females. Similarly, when considering education levels, males are generally about 1 times more likely to have account ownership than females, with a range between 0.5 to 1.5. The credible intervals however are large across the three interaction terms, which denotes large uncertainty in the estimates. This could be due to the fact that in some countries, women have made fair advancements while in a lot of countries due to societal norms where, despite being highly educated, women in many countries are discouraged from managing their own finances through personal bank accounts.
+
+```{r include=FALSE}
+post_sexincome <- summary(fit_2)$summary[c(paste0("beta[24]")),]
+post_educsecsex <- summary(fit_2)$summary[c(paste0("beta[14]")),]
+post_eductertiarysex<-summary(fit_2)$summary[c(paste0("beta[15]")),]
+```
+
+```{r echo=FALSE, fig.height=3, fig.width=5, message=FALSE, warning=FALSE,fig.cap="Estimated Effect on Account Ownership Based on Selected Interaction Effects. Error Bars Represent 95% Credible Intervals for the Mean Posterior Odds Ratio"}
+
+df <- data.frame(
+  Factor = c("Sex*Low Income", "Sex*Secondary Education", "Sex*Tertiary Education"),
+  Average = exp(c(post_sexincome["mean"], post_educsecsex["mean"], post_eductertiarysex["mean"])),
+  Lower = exp(c(post_sexincome["2.5%"],post_educsecsex["2.5%"],  post_eductertiarysex["2.5%"])),
+  Upper = exp(c(post_sexincome["97.5%"], post_educsecsex["97.5%"], post_eductertiarysex["97.5%"]))
+) %>%
+  mutate(across(c(Average, Lower, Upper), round, digits = 3))
+
+
+
+plot <- df |>
+  ggplot(aes(x = Factor, y = Average)) + 
+  geom_point() +
+  geom_errorbar(aes(ymin = Lower, ymax = Upper), width = 0.2) +
+  coord_flip() +  
+  labs(x = "Interaction Effects", y = "Average Estimated Effect", 
+       title = "Estimated Effect on Account Ownership", 
+       subtitle = "Interaction Effects Impact Analysis")
+
+print(plot)
+
+
+```
+
+### Country Effects
+
+In Figure 16, we plot the log-odds to visualize country effects for the ease of visual understanding. There appears to be varying effects in the baseline log odds of each country. For example, an individual in South Korea, the average baseline log odds of account ownership is 3.85 which \~47 times while for an individual in Saudi Africa, the average baseline log odds is -0.57 which is only 0.56 times. However, we cannot ignore the uncertainty in South Korea's estimates, since our data for South Korea had 100% account ownership that explains the huge baseline average odds ratio. Based on our posterior estimates for Model-2, we can say that countries such as South Korea, India, Poland, Hungary and China are leading the emerging markets in terms of financial inclusion while Saudi Arabia, Brazil and South Africa need to work harder to promote financial inclusion within their country
+
+```{r echo=FALSE, fig.height=4, fig.width=4,fig.cap="Estimated Effect on Account Ownership Based on Country. Error Bars Represent 95% Credible Intervals for the Mean Posterior Log-Odds Ratio"}
+post_country <- summary(fit_2)$summary[c(paste0("alpha_hat[", 1:19, "]")),]
+country_results <- data.frame(country = levels(unclass(factor(df_final_eda$country))), 
+                      avg = (post_country[,"mean"]), 
+                      lower =(post_country[,"2.5%"]),
+                      upper = (post_country[,"97.5%"]))
+country_results |> 
+  ggplot(aes(x=country, y=avg)) + 
+  geom_point() +
+  geom_errorbar(aes(ymin=lower, ymax=upper))+
+  theme(axis.text.x = element_text(angle = 90,vjust = 0.5))
+```
+
+## Additional Models
+
+Alternative models with a hierarchical effect for age was also considered since our dataset has a lesser representation for certain age groups. However, due to computational constraints, we decided to stick to the three models as described throughout our study
+
+## Discussion
+
+The focus of this study was to investigate the effects on Financial Inclusion from demographic, income and country level factors. While previous literature focuses on a frequentist framework to achieve this, we use a Bayesian Hierarchichal Approach since it allows us to pool information from multiple levels in order to derive estimates for groups with limited information. For example, the Global Findex Databse doesn't publish indicators for several emerging markets. This model could therefore be used to model financial inclusion for which Findex doesn't publish.
+
+From the model analysis and validation, we found that the model with interaction term between female and all the individual level was able to capture the data better even if it had a lower ELPD. Demographic analysis can be done by examining the effects from age, sex, access to the internet, education levels and Income. We observed that as individual get older, there are less likely to own a bank account. However, as indicated by our EDA, a lot of countries had missing data for certain age groups, hence future work should concentrate on modelling age hierarchically. As for effects of sex, male individuals are likely to have higher odds of owning a bank account which agrees with previous literature. Our effects based on sex and demographics such as Income and Education when grouped together also showed similar results. Hence, this points towards the need to empower females in emerging markets in addition to focusing on economic growth.
+
+The country level mean baseline odds are modeled using a combination of macroeconomic and geographical outreach variables taken from various data sources as well as our review of literature. While emerging markets are similar in nature when it comes to economic growth, nevertheless we found signifacnt variation in the country level mean baseline odds wherein based on the data, countries such as South Korea, India, China and Poland are performing a lot better in the advancement of Financial Inclusion.
+
+While our model is able to capture the effects and variation in our data, we recommend exploration of more suitable priors as this can have an effect on model fit and performance. Currently, weakly informative priors are being used, so more informative priors using information from previous literature on the effects could provide a better fit. Future work could also consider modelling country level variation by including variables that signify the strength of bankruptcy laws in a nation as good laws instill confidence among borrowers and lenders that further bolsters financial health. In addition, future studies could also include developed countries in this model and draw comparisons on the progress of emerging markets. In conclusion, although the model had room for improvement, this analysis has provided insights into key factors that promote financial inclusion, which paves the way for policyholders to develop policies that focus on such an important indicator of the overall well being in a society.
+
+\newpage
+
+## References
+
+-   Al Khub A, Saeudy M, Gerged AM. Digital Financial Inclusion in Emerging Economies: Evidence from Jordan. *Journal of Risk and Financial Management*. 2024; 17(2):66. <https://doi.org/10.3390/jrfm17020066>
+
+-   Determinants of financial inclusion: results of multilevel analyses Bermeo , E. (Author). 1 Oct 2019 Student thesis: Doctoral Thesis › Doctor of Philosophy (PhD)
